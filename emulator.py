@@ -47,7 +47,38 @@ class Emulator:
             self.state.memory+=a
         # memory map = http://www.arcaderestoration.com/memorymap/9087/Tapper.aspx
         self.state.memory += chr(0)* (0xF87F - len(buffer)) #we need to pad out the memory to match the mem map, let's just fill with 0's
+    def push(self,value):
+       # print "pushing {} to {}".format(hex(value),hex(self.state.sp))
+        self.state.memory[self.state.sp] = chr(value)
+        self.state.sp -=1
+        #print 'sp is now {}'.format(hex(self.state.sp))
+    def pop(self):
+        #print 'sp is {}'.format(hex(self.state.sp))
+        value =  self.state.memory[self.state.sp]
+        self.state.sp+=1
+        return ord(value)
 
+    def cmp(self, val):            # 0xbc	CMP H	1	Z, S, P, CY, AC	A - H
+            tempA16 = UInt16(self.state.a)
+            tempA16 -= val
+            tempA8 = UInt8(self.state.a)
+            tempA8-=self.state.h
+            self.state.cc.z =  tempA16 == 0
+            self.state.cc.p = parity(tempA8,8)
+            self.state.cc.ac = val > tempA8
+            self.state.cc.cy = False
+            self.state.pc+=1
+    def ora(self,val):
+            # 0xb5	ORA L	1	Z, S, P, CY, AC	A <- A | L
+            #not possible to have overflow/carry here, so no need to do 16 bit math
+            self.state.a = UInt8(self.state.a | val)
+            self.state.cc.z = self.state.a == 0
+            self.state.cc.s = self.state.a>127
+            self.state.cc.cy = 0
+            self.state.ac = 0
+            self.state.p = parity(self.state.a,8)
+            self.state.pc+=1
+        
     def getNextByte(self):
         #quick helper to get the next (i.e. after the pc) byte of memory
         return ord(self.state.memory[self.state.pc+1])
@@ -65,7 +96,7 @@ class Emulator:
     def Step(self):
         
         opcode = ord(self.state.memory[self.state.pc])
-        print "PC: {}     Opcode: {}".format(hex(self.state.pc),hex(opcode))
+        print "PC: {}     Opcode: {}   SP: {}".format(hex(self.state.pc),hex(opcode),hex(self.state.sp))
         print "Accumulator: {} z flag: {}".format(self.state.a,self.state.cc.z)
         #self.state.pc+=1
       #  print hex(opcode)
@@ -101,16 +132,25 @@ class Emulator:
             print "AFTER: hl: {} h: {} l: {}".format(hex(hl),hex(self.state.h),hex(self.state.l))
 
             self.state.pc+=1        
+        elif opcode == 0xb0:
+            self.ora(self.state.b)
+        elif opcode == 0xb1:
+            self.ora(self.state.c)
+        elif opcode == 0xb2:
+            self.ora(self.state.d)
+        elif opcode == 0xb3:
+            self.ora(self.state.e)
+        elif opcode == 0xb4:
+            self.ora(self.state.h)
         elif opcode == 0xb5:
+            self.ora(self.state.l)
             # 0xb5	ORA L	1	Z, S, P, CY, AC	A <- A | L
             #not possible to have overflow/carry here, so no need to do 16 bit math
-            self.state.a = UInt8(self.state.a | self.state.l)
-            self.state.cc.z = self.state.a == 0
-            self.state.cc.s = self.state.a>127
-            self.state.cc.cy = 0
-            self.state.ac = 0
-            self.state.p = parity(self.state.a,8)
-            self.state.pc+=1
+        elif opcode == 0xb6:
+            hl = UInt16( (self.state.h<<8)+self.state.l)
+            self.ora(hl)
+        elif opcode == 0xb7:
+            self.ora(self.state.a)
         elif opcode == 0x20:
             #JZ e, relative jump for some reason that it jumps to e-2
             e = Int8(self.getNextByte()+2)
@@ -178,8 +218,12 @@ class Emulator:
             print hex(self.state.sp)
             PChi = UInt8( self.state.pc>>8 )
             PClo = UInt8(self.state.pc&0xff)
-            self.state.memory[self.state.sp-1] = PChi 
-            self.state.memory[self.state.sp-2] =  PClo
+            print "pchi is {} pclo is {}".format(hex(PChi),hex(PClo))
+            self.push(PClo)
+            self.push(PChi)
+
+            #self.state.memory[self.state.sp-1] = PChi 
+            #self.state.memory[self.state.sp-2] =  PClo
             code = self.state.memory[self.state.pc:]
             #self.state.sp = struct.unpack("<H", self.state.memory[1:3])[0]
             self.state.pc = struct.unpack("<H", ''.join(code[1:3]))[0]
@@ -190,12 +234,54 @@ class Emulator:
                 print 'next byte is {}'.format(hex((self.getNextByte())))
                 raise Exception("found a 0xdd instruction that wasnt 0xdde5, dont know what to do")
             print ("IX is {}".format(self.state.IX))
-            IXL = self.state.IX &0xff
-            IXH = (self.state.IX >>8)
-            self.state.memory[self.state.sp-2] = IXL
-            self.state.memory[self.state.sp-1] = IXH
-            self.state.pc +=2 #0xdde5 is the instruction
+            IXL = UInt8(self.state.IX &0xff)
+            IXH = UInt8((self.state.IX >>8))
+            self.push(IXL)
+            self.push(IXH)
 
+            #self.state.memory[self.state.sp-2] = IXL
+            #self.state.memory[self.state.sp-1] = IXH
+            self.state.pc +=2 #0xdde5 is the instruction
+        elif opcode == 0xe1:
+            #pop HL is pop l then h
+            self.state.l = self.pop()
+            print type(self.state.l)
+            print "self.state.l is {}".format(self.state.l)
+            self.state.h = self.pop()
+            self.state.pc+=1
+        elif opcode == 0x78:
+            #0x78	MOV A,B	1		A <- B
+            self.state.a = self.state.b
+            self.state.pc+=1
+        elif opcode == 0xb8:
+            self.cmp(self.state.b)
+        elif opcode == 0xb9:
+            self.cmp(self.state.c)
+        elif opcode == 0xba:
+            self.cmp(self.state.d)
+        elif opcode == 0xbb:
+            self.cmp(self.state.e)
+        elif opcode == 0xbc:
+            self.cmp(self.state.h)
+        elif opcode == 0xbd:
+            self.cmp(self.state.l)
+        elif opcode == 0xbe:
+            self.cmp(self.state.m)
+        elif opcode == 0xbf:
+            self.cmp(self.state.a)
+        elif opcode == 0xc0:
+            #0xc0	RNZ	1		if NZ, RET
+            if self.state.cc.z==False:
+                ret = self.pop()
+                print "in rnz returning to {}".format(hex(ret))
+                self.state.pc = ret
+            print "in RNZ not returning"
+            self.state.pc+=1
+        elif opcode == 0x79:
+            #0x79	MOV A,C	1		A <- C
+            self.state.a = self.state.c
+            self.state.pc+=1
+  
 
         else:
             print "instruction {} not implemented...".format(hex(opcode))
