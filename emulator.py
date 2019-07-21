@@ -229,19 +229,28 @@ class Emulator:
             self.state.pc = struct.unpack("<H", ''.join(code[1:3]))[0]
             print "new pc from call is {}".format(hex(self.state.pc))
         elif opcode == 0xdd:
-            #(SP-2) < - IXL, (SP-!) < - IXH
-            if self.getNextByte() != 0xe5:
-                print 'next byte is {}'.format(hex((self.getNextByte())))
-                raise Exception("found a 0xdd instruction that wasnt 0xdde5, dont know what to do")
-            print ("IX is {}".format(self.state.IX))
-            IXL = UInt8(self.state.IX &0xff)
-            IXH = UInt8((self.state.IX >>8))
-            self.push(IXL)
-            self.push(IXH)
-
+            if self.getNextByte() == 0xe5:
+                #page 117
+               # print 'next byte is {}'.format(hex((self.getNextByte())))
+                print ("IX is {}".format(self.state.IX))
+                IXL = UInt8(self.state.IX &0xff)
+                IXH = UInt8((self.state.IX >>8))
+                self.push(IXL)
+                self.push(IXH)
+                self.state.pc +=2 #0xdde5 is the instruction
+            else:
             #self.state.memory[self.state.sp-2] = IXL
             #self.state.memory[self.state.sp-1] = IXH
-            self.state.pc +=2 #0xdde5 is the instruction
+            #okay this opcode is going to be a little bit harder to implement
+            #(SP-2) < - IXL, (SP-!) < - IXH
+                if (self.getNextByte() and 64!=64) or (self.getNextByte() and 6!=0):
+                    errMsg = "0xdd {} dont know how to handle that instruction!".format(hex(self.getNextByte()))
+                    raise Exception(errMsg)
+                raise Exception("asdlkfj")
+                # page 75 of the manual shows this instruction
+                #                print "LD r, (IX+d)"
+
+
         elif opcode == 0xe1:
             #pop HL is pop l then h
             self.state.l = self.pop()
