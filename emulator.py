@@ -59,7 +59,8 @@ class Emulator:
       self.state.memory += a
     # memory map = http://www.arcaderestoration.com/memorymap/9087/Tapper.aspx
     self.state.memory += chr(0) * (
-        0xF87F - len(buffer)
+      0x10000 - len(buffer)
+      #  0xF87F - len(buffer)
     )  #we need to pad out the memory to match the mem map, let's just fill with 0's
 
   def push(self, value):
@@ -104,6 +105,10 @@ class Emulator:
     return struct.unpack("<H", ''.join(code[1:3]))[0]
     #return ord(self.state.memory[self.state.pc+1:self.state.pc+2])
 
+#eventually i will want to have breakpoints and the ability to show the registers
+  def dumpCurrentState(self):
+    return
+
   '''
     EmulateInstruction will grab the current pc instruction
     decode it, perform it and update register values
@@ -112,11 +117,13 @@ class Emulator:
   #    def EmulateInstruction(self):
 
   def Step(self):
-
     opcode = ord(self.state.memory[self.state.pc])
     print "PC: {}     Opcode: {}   SP: {}".format(
         hex(self.state.pc), hex(opcode), hex(self.state.sp))
     print "Accumulator: {} z flag: {}".format(self.state.a, self.state.cc.z)
+    if self.state.cc.z == True:
+      print self.state.b
+     # raise Exception("ASDF")
     #self.state.pc+=1
     #  print hex(opcode)
     if opcode == 0x31:
@@ -263,12 +270,44 @@ class Emulator:
         self.state.pc += 2  #0xdde5 is the instruction
       elif nextbyte == 0x66:
         #reg indirect for H
+        #ram:01b5 dd 66 05        LD         H,(IX+0x5)
+        offset = ord(self.state.memory[self.state.pc + 2])
+        value = self.state.memory[self.state.IX+offset]
+        self.state.h = ord(value)
+        self.state.pc +=3
+      elif nextbyte == 0x56:
+        offset = ord(self.state.memory[self.state.pc + 2])
+        value = self.state.memory[self.state.IX+offset]
+        self.state.d = ord(value)
+        self.state.pc+=3
+      elif nextbyte == 0x5e:
+        offset = ord(self.state.memory[self.state.pc + 2])
+        value = self.state.memory[self.state.IX+offset]
+        self.state.e = ord(value)
+        self.state.pc+=3
+      elif nextbyte == 0x4e:
+        offset = ord(self.state.memory[self.state.pc + 2])
+        value = self.state.memory[self.state.IX+offset]
+        self.state.c = ord(value)
+        self.state.pc+=3
+      elif nextbyte == 0x46:
+        offset = ord(self.state.memory[self.state.pc + 2])
+        value = self.state.memory[self.state.IX+offset]
+        self.state.b = ord(value)
+        self.state.pc+=3
+        
+    #return ord(self.state.memory[self.state.pc+1])
+      elif nextbyte == 0x6e:
+        #regindirect for L
+        l = self.state.l
+        h = self.state.h
+        print "l is:{} h is: {}".format(type(l), type(h))
+        print "l is {} h is {}".format(l, h)
         hl = UInt16((self.state.h << 8) + self.state.l)
         offset = ord(self.state.memory[self.state.pc + 2])
         val = self.state.memory[hl + offset]
-        self.state.h = ord(val)
+        self.state.l = ord(val)
         self.state.pc += 3  #3 because of 0xdd 66 then offset
-    #return ord(self.state.memory[self.state.pc+1])
       elif nextbyte == 0x6e:
         #regindirect for L
         l = self.state.l
@@ -280,8 +319,10 @@ class Emulator:
         val = self.state.memory[hl + offset]
         self.state.l = val
         self.state.pc += 3  #3 because of 0xdd 66 then offset
+           
 
       else:
+        print "next byte is: {}".format(hex(self.getNextByte()))
         #self.state.memory[self.state.sp-2] = IXL
         #self.state.memory[self.state.sp-1] = IXH
         #okay this opcode is going to be a little bit harder to implement
@@ -289,6 +330,8 @@ class Emulator:
         if (self.getNextByte() and 64 != 64) or (self.getNextByte() and 6 != 0):
           errMsg = "0xdd {} dont know how to handle that instruction!".format(
               hex(self.getNextByte()))
+          print hex(self.state.pc)
+
           raise Exception(errMsg)
         raise Exception("asdlkfj")
         # page 75 of the manual shows this instruction
@@ -333,7 +376,51 @@ class Emulator:
       #0x79	MOV A,C	1		A <- C
       self.state.a = self.state.c
       self.state.pc += 1
-
+    elif opcode == 0xed:
+      nextbyte = self.getNextByte()
+      if nextbyte==0xb0:
+        print "instruction is ldir"
+        #Repeats LDI (LD (DE),(HL), then increments DE, HL, and decrements BC) until BC=0. Note that if BC=0 before this instruction is called, it will loop around until BC=0 again.
+        #i think i might actually be good up to this point...but 
+        de = UInt16((self.state.d << 8) + self.state.e)
+        hl = UInt16((self.state.h << 8) + self.state.l)
+        bc = UInt16((self.state.b << 8) + self.state.c)
+        print "bc: {} de: {} hl: {} len(memory):{}".format(hex(bc),hex(de),hex(hl),hex(len(self.state.memory)))
+        print "(de): {}".format(hex(ord(self.state.memory[de])))
+        print "(hl): {}".format(hex(ord(self.state.memory[hl])))
+        raise Exception("ASDF") #TODO fix this instruction
+        self.state.memory[de] = self.state.memory[hl]
+        de+=1
+        hl+=1
+        bc-=1
+        if bc == -1:
+          bc = pow(2,16)
+        self.state.d = de >> 8
+        self.state.e = de&0xff
+        self.state.h = hl >> 8
+        self.state.l = hl & 0xff
+        self.state.b = bc>>8
+        self.state.c = bc&0xff
+        while bc!=0:
+          de = UInt16((self.state.d << 8) + self.state.e)
+          hl = UInt16((self.state.h << 8) + self.state.l)
+          bc = UInt16((self.state.b << 8) + self.state.c)
+        #  print "bc: {} de: {} hl: {} len(memory):{}".format(hex(bc),hex(de),hex(hl),hex(len(self.state.memory)))
+          self.state.memory[de] = self.state.memory[hl]
+          de+=1
+          hl+=1
+          bc-=1
+          self.state.d = de >> 8
+          self.state.e = de&0xff
+          self.state.h = hl >> 8
+          self.state.l = hl & 0xff
+          self.state.b = bc>>8
+          self.state.c = bc&0xff
+        self.state.cc.p = 0
+        self.state.pc+=2
+      else:
+        raise Exception("instruction {}{} not implemented".format(hex(opcode),hex(nextbyte)))
+        
     else:
       print "instruction {} not implemented...".format(hex(opcode))
       raise Exception("unimplemented instruction")
